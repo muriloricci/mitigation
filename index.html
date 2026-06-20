@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mitigation Solver</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f4f0; --surface: #ffffff; --surface2: #f0efe9;
+    --border: rgba(0,0,0,0.12); --border-strong: rgba(0,0,0,0.25);
+    --text: #1a1a18; --text-muted: #6b6a65;
+    --accent: #1d9e75; --accent-bg: #e1f5ee; --accent-text: #085041;
+    --danger: #a32d2d; --danger-bg: #fcebeb; --danger-text: #501313;
+    --warn-bg: #faeeda; --warn-text: #633806;
+    --mono: 'Courier New', Courier, monospace;
+  }
+  :root.dark {
+    --bg: #1a1a1e; --surface: #26262c; --surface2: #2e2e36;
+    --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.2);
+    --text: #e8e6e0; --text-muted: #8a8880;
+    --accent: #2bbf8a; --accent-bg: #0d2e22; --accent-text: #6de0b0;
+    --danger: #d95f5f; --danger-bg: #2e1414; --danger-text: #f0a0a0;
+    --warn-bg: #2e2210; --warn-text: #d4a96a;
+  }
+
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 15px; line-height: 1.6; min-height: 100vh;
+    transition: background 0.2s, color 0.2s;
+    display: flex; justify-content: center;
+  }
+
+  /* Two-column layout */
+  .page-wrap {
+    display: flex; gap: 0; min-height: 100vh;
+    width: 100%; max-width: 1080px;
+  }
+  .main-col {
+    flex: 1; min-width: 0; max-width: 720px;
+    padding: 3rem 2rem 3rem 3rem;
+  }
+  .side-col {
+    width: 300px; flex-shrink: 0;
+    padding: 3rem 2rem 3rem 0;
+    position: sticky; top: 0; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  @media (max-width: 900px) {
+    .page-wrap { flex-direction: column; }
+    .main-col { padding: 2rem 1rem; max-width: 100%; }
+    .side-col { width: 100%; height: auto; position: static; padding: 0 1rem 2rem; }
+  }
+
+  h1 { font-size: 22px; font-weight: normal; letter-spacing: -0.3px; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: var(--text-muted); font-family: var(--mono); margin-bottom: 2.5rem; }
+  .section { margin-bottom: 2rem; }
+  .section-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; font-family: var(--mono); }
+
+  input[type="number"], input[type="text"] {
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 4px; padding: 5px 8px; font-size: 14px;
+    font-family: var(--mono); color: var(--text); outline: none; transition: border-color 0.15s;
+  }
+  input[type="number"] { width: 72px; }
+  input[type="number"]:focus, input[type="text"]:focus { border-color: var(--accent); }
+
+  select {
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 4px; padding: 5px 8px; font-size: 13px;
+    font-family: var(--mono); color: var(--text); outline: none; cursor: pointer;
+    appearance: none; -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6a65'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center; padding-right: 24px;
+    transition: border-color 0.15s;
+  }
+  select:focus { border-color: var(--accent); }
+
+  button {
+    background: transparent; border: 1px solid var(--border-strong);
+    border-radius: 4px; padding: 5px 14px; font-size: 13px;
+    font-family: Georgia, serif; color: var(--text); cursor: pointer; transition: background 0.12s;
+  }
+  button:hover { background: var(--surface2); }
+  button:active { transform: scale(0.98); }
+  .btn-remove { border-color: transparent; color: var(--danger); padding: 2px 8px; font-size: 16px; line-height: 1; }
+  .btn-remove:hover { background: var(--danger-bg); }
+  .btn-solve { padding: 8px 24px; font-size: 14px; border-color: var(--accent); color: var(--accent-text); }
+  .btn-solve:hover { background: var(--accent-bg); }
+
+  .solve-bar {
+    position: sticky; top: 0; z-index: 50; background: var(--bg);
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+    margin-bottom: 1.5rem; display: flex; align-items: center; gap: 10px;
+  }
+  .theme-toggle {
+    margin-left: auto; font-size: 18px; border: none; padding: 4px 8px;
+    cursor: pointer; background: transparent; line-height: 1;
+  }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+  /* Weapon cards */
+  .weapon-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin-bottom: 8px; }
+  .weapon-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .weapon-num { font-size: 12px; font-family: var(--mono); color: var(--text-muted); flex-shrink: 0; }
+  .weapon-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .field-group { display: flex; flex-direction: column; gap: 4px; }
+  .field-group label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
+  .field-pair { display: flex; gap: 6px; align-items: center; }
+  .pair-sep { font-size: 12px; color: var(--text-muted); }
+  .weapon-preset-row { margin-bottom: 10px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .preset-select { font-size: 13px; max-width: 260px; }
+  .preset-or { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+
+  /* Results */
+  .result-section { margin-bottom: 1.25rem; }
+  .result-box { border-radius: 6px; padding: 14px 18px; font-family: var(--mono); margin-bottom: 8px; }
+  .result-box.error { background: var(--danger-bg); border: 1px solid var(--danger); color: var(--danger-text); }
+  .result-box.warn  { background: var(--warn-bg);   border: 1px solid #ba7517;      color: var(--warn-text); }
+  .result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .result-card { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; padding: 10px 14px; font-family: var(--mono); }
+  .result-card.exact { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-text); }
+  .result-card.pinned { border-color: #b07d10; background: var(--warn-bg); }
+  .result-card.pinned .result-card-label { color: var(--warn-text); }
+  .result-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 2px; display: flex; align-items: center; gap: 6px; }
+  .result-card.exact .result-card-label { color: var(--accent-text); opacity: 0.75; }
+  .result-card-value { font-size: 20px; font-weight: bold; letter-spacing: -0.3px; }
+  .result-card-sub { font-size: 11px; color: var(--text-muted); margin-top: 3px; word-break: break-word; }
+  .detail-line { font-size: 12px; color: var(--text-muted); font-family: var(--mono); margin-bottom: 3px; }
+  #details-area { margin-bottom: 12px; }
+
+  /* Element badges */
+  .elem-badge { font-size: 11px; font-family: var(--mono); padding: 2px 7px; border-radius: 3px; font-weight: bold; letter-spacing: 0.03em; }
+  .el-physical { background:#e8e6e0; color:#3a3830; }
+  .el-earth    { background:#dff0d0; color:#2a5018; }
+  .el-fire     { background:#fde8d0; color:#7a2800; }
+  .el-death    { background:#e0d8f0; color:#2d1a5a; }
+  .el-energy   { background:#d8ecfc; color:#0a3a6a; }
+  .el-holy     { background:#fdf8d0; color:#5a4a00; }
+  .el-ice      { background:#d8f4fc; color:#0a3a4a; }
+
+  /* Expected damage table */
+  .wtable { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:13px; margin-bottom:16px; }
+  .wtable th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); padding:4px 8px 8px; font-weight:normal; }
+  .wtable td { padding:5px 8px; border-top:1px solid var(--border); vertical-align:middle; }
+  .wtable tr.ambiguous td { background:var(--danger-bg); }
+  .wtable tr.ambiguous td:first-child { border-left:3px solid var(--danger); }
+  .wtable .dmg-cell { font-weight:bold; }
+  .wtable .hint-cell { font-size:11px; color:var(--danger); }
+  .elem-group-label { font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-muted); font-family:var(--mono); margin:12px 0 4px; display:flex; align-items:center; gap:8px; }
+
+  .formula-note { font-size: 12px; color: var(--text-muted); font-family: var(--mono); margin-top: 1rem; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; }
+  #progress-area { font-size: 12px; font-family: var(--mono); color: var(--text-muted); margin-top: 1rem; }
+  .progress-bar-wrap { height: 4px; background: var(--border); border-radius: 2px; margin-top: 6px; }
+  .progress-bar-fill { height: 4px; background: var(--accent); border-radius: 2px; transition: width 0.1s; }
+
+  /* Log analyser (side column) */
+  .side-col .section-label { margin-bottom: 8px; }
+  .log-textarea {
+    width: 100%; flex: 1; min-height: 200px;
+    background: var(--surface); border: 1px solid var(--border-strong);
+    border-radius: 4px; padding: 8px; font-size: 12px;
+    font-family: var(--mono); color: var(--text);
+    resize: none; outline: none; line-height: 1.5;
+    transition: border-color 0.15s;
+  }
+  .log-textarea:focus { border-color: var(--accent); }
+  .log-result {
+    margin-top: 10px; padding: 10px 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 4px; font-family: var(--mono); font-size: 13px;
+  }
+  .log-result-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .log-result-label { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .log-result-val { font-weight: bold; font-size: 16px; }
+  .log-count { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .log-clear { font-size: 11px; margin-top: 8px; padding: 3px 10px; }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+<!-- ── Main column ─────────────────────────────────────────────────────────── -->
+<div class="main-col">
+  <h1>Mitigation Solver</h1>
+  <div class="subtitle">back-calculate mitigation &amp; elemental resistances from observed damage</div>
+
+  <div class="solve-bar">
+    <button class="btn-solve" onclick="startSolve()">Solve</button>
+    <button id="btn-cancel" style="display:none;" onclick="cancelSolve()">Cancel</button>
+    <span id="solve-status" style="font-size:12px; font-family:var(--mono); color:var(--text-muted);"></span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode">🌙</button>
+  </div>
+
+  <div id="progress-area" style="display:none; margin-bottom:1rem;">
+    <span id="progress-text">Searching…</span>
+    <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-fill" style="width:0%"></div></div>
+  </div>
+
+  <div id="result-area" style="margin-bottom:1.5rem;"></div>
+
+  <hr class="divider" />
+
+  <div class="section">
+    <div class="section-label">Search bounds</div>
+    <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end;">
+      <div class="field-group"><label>Resist min (%)</label><input type="number" id="r-min" value="-100" step="1" style="width:80px;" /></div>
+      <div class="field-group"><label>Resist max (%)</label><input type="number" id="r-max" value="200" step="1" style="width:80px;" /></div>
+      <div class="field-group"><label>Mitigation max (%)</label><input type="number" id="m-max" value="10" min="0" max="100" step="0.01" style="width:80px;" /></div>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); font-family:var(--mono); margin-top:6px;">
+      Resist: &lt;0% heals &nbsp;|&nbsp; 100% = neutral &nbsp;|&nbsp; &gt;100% = weak. Mitigation searched at 0.01% steps.
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Weapons</div>
+    <div id="weapons-list"></div>
+    <button onclick="addWeapon()">+ add weapon</button>
+  </div>
+
+  <div class="section" id="weapons-table-section" style="display:none;">
+    <div class="section-label">Expected damage by known weapon</div>
+    <div style="font-size:12px; color:var(--text-muted); font-family:var(--mono); margin-bottom:10px;">Based on solve results. <span style="color:var(--danger);">Red rows</span> are ambiguous — testing them would help narrow things down.</div>
+    <div id="weapons-table-body"></div>
+  </div>
+
+  <div class="formula-note">Formula: final = &lfloor;&lfloor;raw &times; resist/100&rceil; &times; (1 &minus; mit/100)&rfloor; &nbsp;(round then floor)</div>
+</div>
+
+<!-- ── Side column: log analyser ───────────────────────────────────────────── -->
+<div class="side-col">
+  <div class="section-label">Log analyser</div>
+  <div style="font-size:11px; color:var(--text-muted); font-family:var(--mono); margin-bottom:8px;">Paste combat log — extracts min &amp; max hits.</div>
+  <textarea class="log-textarea" id="log-input" placeholder="Paste combat log here…&#10;&#10;e.g. A creature loses 42 hitpoints due to your attack." oninput="parseLog()"></textarea>
+  <div class="log-result" id="log-result" style="display:none;">
+    <div class="log-result-row">
+      <div><div class="log-result-label">Min</div><div class="log-result-val" id="log-min">—</div></div>
+      <div><div class="log-result-label">Max</div><div class="log-result-val" id="log-max">—</div></div>
+    </div>
+    <div class="log-count" id="log-count"></div>
+  </div>
+  <div style="margin-top:8px; display:flex; gap:6px;">
+    <button class="log-clear" onclick="clearLog()">Clear log</button>
+    <button class="log-clear" id="btn-use-log" style="display:none; border-color:var(--accent); color:var(--accent-text);" onclick="useLogValues()">Use as observed →</button>
+  </div>
+</div>
+
+</div><!-- end page-wrap -->
+
+<script>
+// ── Weapon database ──────────────────────────────────────────────────────────
+const WEAPONS_DB = [
+  // Physical
+  { "name": "crypt jaw",                    "element": "physical", "min": 85,  "max": 135 },
+  // Earth
+  { "name": "poison bomb",                  "element": "earth",    "min": 5,   "max": 5   },
+  { "name": "snakebite rod",               "element": "earth",    "min": 8,   "max": 18  },
+  { "name": "terra rod",                    "element": "earth",    "min": 37,  "max": 53  },
+  { "name": "springsprout rod",            "element": "earth",    "min": 56,  "max": 74  },
+  { "name": "muck rod",                     "element": "earth",    "min": 75,  "max": 95  },
+  { "name": "cobra rod",                    "element": "earth",    "min": 70,  "max": 110 },
+  { "name": "jungle wand",                 "element": "earth",    "min": 80,  "max": 100 },
+  { "name": "falcon rod",                   "element": "earth",    "min": 87,  "max": 101 },
+  { "name": "sanguine rod",               "element": "earth",    "min": 100, "max": 124 },
+  // Fire
+  { "name": "fire bomb",                    "element": "fire",     "min": 20,  "max": 20  },
+  { "name": "fire bomb (dot)",             "element": "fire",     "min": 10,  "max": 10  },
+  { "name": "the scorcher",               "element": "fire",     "min": 4,   "max": 8   },
+  { "name": "wand of dragonbreath",       "element": "fire",     "min": 13,  "max": 25  },
+  { "name": "wand of draconia",           "element": "fire",     "min": 23,  "max": 37  },
+  { "name": "wand of inferno",            "element": "fire",     "min": 56,  "max": 74  },
+  { "name": "wand of everblazing",        "element": "fire",     "min": 75,  "max": 95  },
+  { "name": "energized limb",             "element": "fire",     "min": 88,  "max": 108 },
+  { "name": "eldritch wand",              "element": "fire",     "min": 85,  "max": 105 },
+  { "name": "sanguine coil",              "element": "fire",     "min": 113, "max": 125 },
+  // Death
+  { "name": "necrotic rod",               "element": "death",    "min": 23,  "max": 37  },
+  { "name": "underworld rod",             "element": "death",    "min": 56,  "max": 74  },
+  { "name": "wand of darkness",           "element": "death",    "min": 75,  "max": 95  },
+  { "name": "wand of voodoo",             "element": "death",    "min": 56,  "max": 74  },
+  { "name": "inferniarch wand",           "element": "death",    "min": 98,  "max": 116 },
+  { "name": "soultainter",               "element": "death",    "min": 100, "max": 120 },
+  // Energy
+  { "name": "energy bomb",               "element": "energy",   "min": 30,  "max": 30  },
+  { "name": "energy bomb (dot)",         "element": "energy",   "min": 25,  "max": 25  },
+  { "name": "wand of vortex",            "element": "energy",   "min": 8,   "max": 18  },
+  { "name": "wand of cosmic energy",     "element": "energy",   "min": 37,  "max": 53  },
+  { "name": "wand of dimensions",        "element": "energy",   "min": 44,  "max": 62  },
+  { "name": "wand of starstorm",         "element": "energy",   "min": 56,  "max": 74  },
+  { "name": "wand of defiance",          "element": "energy",   "min": 75,  "max": 95  },
+  { "name": "dream blossom staff",       "element": "energy",   "min": 63,  "max": 77  },
+  { "name": "wand of destruction",       "element": "energy",   "min": 80,  "max": 110 },
+  { "name": "naga wand",                 "element": "energy",   "min": 90,  "max": 120 },
+  { "name": "cobra wand",                "element": "energy",   "min": 94,  "max": 100 },
+  { "name": "falcon wand",               "element": "energy",   "min": 86,  "max": 102 },
+  // Ice
+  { "name": "the chiller",              "element": "ice",      "min": 4,   "max": 8   },
+  { "name": "moonlight rod",            "element": "ice",      "min": 13,  "max": 25  },
+  { "name": "northwind rod",            "element": "ice",      "min": 23,  "max": 37  },
+  { "name": "hailstorm rod",            "element": "ice",      "min": 56,  "max": 74  },
+  { "name": "glacial rod",              "element": "ice",      "min": 75,  "max": 95  },
+  { "name": "jungle rod",               "element": "ice",      "min": 80,  "max": 100 },
+  { "name": "deepling ceremonial dagger","element": "ice",     "min": 86,  "max": 98  },
+  { "name": "rod of destruction",       "element": "ice",      "min": 80,  "max": 110 },
+  { "name": "lion wand",                "element": "ice",      "min": 89,  "max": 109 },
+  { "name": "deepling fork",            "element": "ice",      "min": 80,  "max": 120 },
+  { "name": "eldritch rod",             "element": "ice",      "min": 85,  "max": 105 },
+  { "name": "naga rod",                 "element": "ice",      "min": 90,  "max": 110 },
+  { "name": "lion rod",                 "element": "ice",      "min": 85,  "max": 105 },
+  { "name": "soulhexer",               "element": "ice",      "min": 98,  "max": 118 },
+];
+
+const ELEMENTS = ['physical','earth','fire','death','energy','holy','ice'];
+const ELEM_LABELS = { physical:'Physical', earth:'Earth', fire:'Fire', death:'Death', energy:'Energy', holy:'Holy', ice:'Ice' };
+
+let weapons = [], nextId = 1, cancelFlag = false;
+
+// ── Theme ────────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const dark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('theme', dark ? 'dark' : 'light');
+  document.querySelector('.theme-toggle').textContent = dark ? '☀️' : '🌙';
+}
+(function() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.classList.add('dark');
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = document.querySelector('.theme-toggle');
+      if (btn) btn.textContent = '☀️';
+    });
+  }
+})();
+
+// ── Log analyser ─────────────────────────────────────────────────────────────
+const LOG_RE = /.+loses (\d+) hitpoints due to your attack\./;
+
+function parseLog() {
+  const lines = document.getElementById('log-input').value.split('\n');
+  const hits = [];
+  for (const line of lines) {
+    const m = LOG_RE.exec(line);
+    if (m) hits.push(parseInt(m[1]));
+  }
+  const result = document.getElementById('log-result');
+  const useBtn = document.getElementById('btn-use-log');
+  if (!hits.length) { result.style.display = 'none'; useBtn.style.display = 'none'; return; }
+  const mn = Math.min(...hits), mx = Math.max(...hits);
+  document.getElementById('log-min').textContent = mn;
+  document.getElementById('log-max').textContent = mx;
+  document.getElementById('log-count').textContent = `${hits.length} hit${hits.length !== 1 ? 's' : ''} matched`;
+  result.style.display = '';
+  useBtn.style.display = '';
+}
+
+function clearLog() {
+  document.getElementById('log-input').value = '';
+  document.getElementById('log-result').style.display = 'none';
+  document.getElementById('btn-use-log').style.display = 'none';
+}
+
+function useLogValues() {
+  // Fill observed min/max on the last weapon card that has no obs values yet,
+  // or on the most recently added card.
+  const mn = document.getElementById('log-min').textContent;
+  const mx = document.getElementById('log-max').textContent;
+  if (!weapons.length) { addWeapon(); }
+  const lastId = weapons[weapons.length - 1];
+  const card = document.getElementById('weapon-' + lastId);
+  if (!card) return;
+  card.querySelector('.obs-min').value = mn;
+  card.querySelector('.obs-max').value = mx;
+}
+
+// ── Weapon cards ─────────────────────────────────────────────────────────────
+function addWeapon() {
+  const id = nextId++;
+  weapons.push(id);
+  const card = document.createElement('div');
+  card.className = 'weapon-card';
+  card.id = 'weapon-' + id;
+
+  // Build preset options grouped by element
+  let presetOpts = '<option value="">— custom —</option>';
+  for (const elem of ELEMENTS) {
+    const group = WEAPONS_DB.filter(w => w.element === elem);
+    if (!group.length) continue;
+    presetOpts += `<optgroup label="${ELEM_LABELS[elem]}">`;
+    for (const w of group)
+      presetOpts += `<option value="${elem}|${w.min}|${w.max}">${w.name} (${w.min}–${w.max})</option>`;
+    presetOpts += '</optgroup>';
+  }
+
+  const opts = ELEMENTS.map(e => `<option value="${e}">${ELEM_LABELS[e]}</option>`).join('');
+
+  card.innerHTML = `
+    <div class="weapon-header">
+      <span class="weapon-num" id="wlabel-${id}">#${weapons.length}</span>
+      <button class="btn-remove" onclick="removeWeapon(${id})">×</button>
+    </div>
+    <div class="weapon-preset-row">
+      <select class="preset-select" onchange="applyPreset(${id}, this)">
+        ${presetOpts}
+      </select>
+    </div>
+    <div class="weapon-fields">
+      <div class="field-group">
+        <label>Element</label>
+        <select class="elem-select">${opts}</select>
+      </div>
+      <div class="field-group">
+        <label>Raw damage</label>
+        <div class="field-pair">
+          <input type="number" class="raw-min" placeholder="min" style="width:68px;" />
+          <span class="pair-sep">–</span>
+          <input type="number" class="raw-max" placeholder="max" style="width:68px;" />
+        </div>
+      </div>
+      <div class="field-group">
+        <label>Observed (final)</label>
+        <div class="field-pair">
+          <input type="number" class="obs-min" placeholder="min" style="width:68px;" />
+          <span class="pair-sep">–</span>
+          <input type="number" class="obs-max" placeholder="max" style="width:68px;" />
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('weapons-list').appendChild(card);
+}
+
+function applyPreset(id, sel) {
+  if (!sel.value) return;
+  const [elem, min, max] = sel.value.split('|');
+  const card = document.getElementById('weapon-' + id);
+  card.querySelector('.elem-select').value = elem;
+  card.querySelector('.raw-min').value = min;
+  card.querySelector('.raw-max').value = max;
+}
+
+function removeWeapon(id) {
+  weapons = weapons.filter(w => w !== id);
+  document.getElementById('weapon-' + id)?.remove();
+  weapons.forEach((wid, i) => { const l = document.getElementById('wlabel-' + wid); if (l) l.textContent = '#' + (i + 1); });
+}
+
+function getWeaponData() {
+  return weapons.map(id => {
+    const row = document.getElementById('weapon-' + id);
+    return {
+      element: row.querySelector('.elem-select').value,
+      rawMin:  parseFloat(row.querySelector('.raw-min').value),
+      rawMax:  parseFloat(row.querySelector('.raw-max').value),
+      obsMin:  parseFloat(row.querySelector('.obs-min').value),
+      obsMax:  parseFloat(row.querySelector('.obs-max').value),
+    };
+  });
+}
+
+// ── Solver ────────────────────────────────────────────────────────────────────
+function applyFormula(raw, resist, mit) {
+  return Math.trunc(Math.round(raw * resist / 100) * (1 - mit / 100));
+}
+
+function intersectMaps(a, b) {
+  if (a === null) return b;
+  const out = new Map();
+  for (const [mit, rA] of a) {
+    if (!b.has(mit)) continue;
+    const shared = new Set([...rA].filter(r => b.get(mit).has(r)));
+    if (shared.size > 0) out.set(mit, shared);
+  }
+  return out;
+}
+
+function pairsForWeapon(w, rMin, rMax, mMax) {
+  const byMit = new Map();
+  const mSteps = Math.round(mMax * 100);
+  for (let r = rMin; r <= rMax; r++) {
+    const eMin = Math.round(w.rawMin * r / 100);
+    const eMax = Math.round(w.rawMax * r / 100);
+    for (let mi = 0; mi <= mSteps; mi++) {
+      const mit = mi / 100;
+      if (Math.trunc(eMin * (1 - mit / 100)) === w.obsMin &&
+          Math.trunc(eMax * (1 - mit / 100)) === w.obsMax) {
+        if (!byMit.has(mit)) byMit.set(mit, new Set());
+        byMit.get(mit).add(r);
+      }
+    }
+  }
+  return byMit;
+}
+
+function cancelSolve() {
+  cancelFlag = true;
+  document.getElementById('btn-cancel').style.display = 'none';
+  document.getElementById('progress-area').style.display = 'none';
+}
+
+async function startSolve() {
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  const data = getWeaponData();
+  const resultArea = document.getElementById('result-area');
+
+  if (data.length === 0) { resultArea.innerHTML = '<div class="result-box warn">Add at least one weapon.</div>'; return; }
+  for (const d of data) {
+    if ([d.rawMin, d.rawMax, d.obsMin, d.obsMax].some(v => isNaN(v))) {
+      resultArea.innerHTML = '<div class="result-box error">Fill in all fields for every weapon.</div>'; return;
+    }
+  }
+
+  const rMin = parseInt(document.getElementById('r-min').value) || 0;
+  const rMax = parseInt(document.getElementById('r-max').value) || 200;
+  const mMax = parseFloat(document.getElementById('m-max').value) || 100;
+
+  cancelFlag = false;
+  document.getElementById('btn-cancel').style.display = '';
+  document.getElementById('progress-area').style.display = '';
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('progress-text').textContent = 'Searching…';
+  resultArea.innerHTML = '';
+
+  const byElement = {};
+  for (const d of data) (byElement[d.element] = byElement[d.element] || []).push(d);
+
+  const elemResults = {}, elemDetails = {};
+  const elements = Object.keys(byElement);
+
+  for (let ei = 0; ei < elements.length; ei++) {
+    if (cancelFlag) return;
+    const elem = elements[ei];
+    document.getElementById('progress-text').textContent = `Processing ${ELEM_LABELS[elem]} (${ei+1}/${elements.length})…`;
+    document.getElementById('progress-fill').style.width = `${Math.round(ei / elements.length * 100)}%`;
+    let combined = null;
+    for (const w of byElement[elem]) {
+      if (cancelFlag) return;
+      await new Promise(r => setTimeout(r, 0));
+      combined = intersectMaps(combined, pairsForWeapon(w, rMin, rMax, mMax));
+    }
+    elemResults[elem] = combined || new Map();
+    elemDetails[elem] = { weaponCount: byElement[elem].length, pairCount: elemResults[elem].size };
+  }
+
+  document.getElementById('progress-fill').style.width = '100%';
+  document.getElementById('btn-cancel').style.display = 'none';
+  document.getElementById('progress-area').style.display = 'none';
+
+  let validMits = null;
+  for (const map of Object.values(elemResults)) {
+    const mits = new Set(map.keys());
+    validMits = validMits === null ? mits : new Set([...validMits].filter(m => mits.has(m)));
+  }
+  const sortedMits = [...(validMits || [])].sort((a, b) => a - b);
+
+  window._lastElemResults = elemResults;
+  window._lastElemDetails = elemDetails;
+  window._lastSortedMitsBase = sortedMits;
+  window._lastByElement = byElement;
+  window._lastRMin = rMin; window._lastRMax = rMax; window._lastMMax = mMax;
+
+  renderResults(elemResults, elemDetails, sortedMits, {});
+}
+
+function renderResults(elemResults, elemDetails, sortedMits, pins) {
+  const resultArea = document.getElementById('result-area');
+  let html = '<div id="details-area">';
+  for (const [elem, det] of Object.entries(elemDetails))
+    html += `<div class="detail-line">${ELEM_LABELS[elem]}: ${det.weaponCount} weapon${det.weaponCount !== 1 ? 's' : ''} → ${det.pairCount} (mit, resist) pair${det.pairCount !== 1 ? 's' : ''}</div>`;
+  html += '</div>';
+
+  if (sortedMits.length === 0) {
+    html += '<div class="result-box error">No consistent solution found — try widening the resist range, or check your observed values.</div>';
+    resultArea.innerHTML = html; renderWeaponsTable(elemResults, sortedMits); return;
+  }
+
+  html += '<div class="result-section"><div class="section-label" style="margin-bottom:8px;">Mitigation</div>';
+  if (sortedMits.length === 1) {
+    html += `<div class="result-card exact"><div class="result-card-label">Exact value</div><div class="result-card-value">${sortedMits[0].toFixed(2)}%</div></div>`;
+  } else {
+    const lo = sortedMits[0], hi = sortedMits[sortedMits.length - 1];
+    const allStr = sortedMits.length <= 20 ? sortedMits.map(v => v.toFixed(2) + '%').join(', ') : `${sortedMits.length} values`;
+    html += `<div class="result-card"><div class="result-card-label">Range</div><div class="result-card-value">${lo.toFixed(2)}% – ${hi.toFixed(2)}%</div><div class="result-card-sub">${allStr}</div></div>`;
+  }
+  html += '</div>';
+
+  html += '<div class="result-section"><div class="section-label" style="margin-bottom:8px;">Elemental resistances</div><div class="result-grid">';
+  for (const [elem, map] of Object.entries(elemResults)) {
+    let allResists = new Set();
+    for (const mit of sortedMits) if (map.has(mit)) map.get(mit).forEach(r => allResists.add(r));
+    const sr = [...allResists].sort((a, b) => a - b);
+    const isPinned = pins[elem] !== undefined;
+    const valueStr = !sr.length ? '—' : sr.length === 1 ? sr[0] + '%' : `${sr[0]}–${sr[sr.length-1]}%`;
+    const cardClass = sr.length === 1 ? 'exact' : isPinned ? 'pinned' : '';
+    const subStr = sr.length > 1 && sr.length <= 15 ? sr.map(v => v + '%').join(', ') : sr.length > 15 ? `${sr.length} values` : '';
+    const mid = sr[Math.floor(sr.length / 2)];
+    const interp = !sr.length ? '' : mid < 0 ? 'heals creature' : mid < 100 ? 'resistant' : mid === 100 ? 'neutral' : 'weak';
+    html += `<div class="result-card ${cardClass}">
+      <div class="result-card-label"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span>${isPinned ? ' <span style="font-size:10px;opacity:0.6;">pinned</span>' : ''}</div>
+      <div class="result-card-value">${valueStr}</div>
+      ${interp ? `<div class="result-card-sub">${interp}</div>` : ''}
+      ${subStr  ? `<div class="result-card-sub">${subStr}</div>` : ''}
+    </div>`;
+  }
+  html += '</div></div>';
+
+  if (sortedMits.length > 1)
+    html += '<div class="result-box warn" style="font-size:13px;">Multiple solutions remain — add more weapons, or pin a known resistance below.</div>';
+
+  html += '<div class="result-section" style="margin-top:1.5rem;">';
+  html += '<div class="section-label" style="margin-bottom:6px;">Pin known resistances</div>';
+  html += '<div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:10px;">Enter the exact resist % for any element you already know, then apply.</div>';
+  html += '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">';
+  for (const elem of Object.keys(elemResults)) {
+    const pinVal = pins[elem] !== undefined ? pins[elem] : '';
+    html += `<div class="field-group"><label style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span></label><input type="number" id="pin-${elem}" value="${pinVal}" placeholder="e.g. 90" style="width:72px;" /></div>`;
+  }
+  html += '</div><div style="margin-top:10px;display:flex;gap:8px;">';
+  html += '<button class="btn-solve" style="padding:5px 16px;font-size:13px;" onclick="applyPins()">Apply pins</button>';
+  if (Object.keys(pins).length > 0)
+    html += '<button onclick="clearPins()" style="padding:5px 16px;font-size:13px;">Clear pins</button>';
+  html += '</div></div>';
+
+  resultArea.innerHTML = html;
+  renderWeaponsTable(elemResults, sortedMits);
+}
+
+function applyPins() {
+  const byElement = window._lastByElement, elemDetails = window._lastElemDetails;
+  const rMin = window._lastRMin, rMax = window._lastRMax, mMax = window._lastMMax;
+  if (!byElement || !elemDetails) return;
+  const pins = {};
+  for (const elem of Object.keys(byElement)) {
+    const inp = document.getElementById('pin-' + elem);
+    if (inp && inp.value !== '') { const v = parseInt(inp.value); if (!isNaN(v)) pins[elem] = v; }
+  }
+  const filtered = {};
+  for (const [elem, wlist] of Object.entries(byElement)) {
+    if (pins[elem] !== undefined) {
+      const pinned = pins[elem];
+      let combined = null;
+      for (const w of wlist) combined = intersectMaps(combined, pairsForWeapon(w, pinned, pinned, mMax));
+      filtered[elem] = combined || new Map();
+    } else {
+      filtered[elem] = window._lastElemResults[elem];
+    }
+  }
+  let validMits = null;
+  for (const map of Object.values(filtered)) {
+    const mits = new Set(map.keys());
+    validMits = validMits === null ? mits : new Set([...validMits].filter(m => mits.has(m)));
+  }
+  renderResults(filtered, elemDetails, [...(validMits || [])].sort((a, b) => a - b), pins);
+}
+
+function clearPins() {
+  const e = window._lastElemResults, d = window._lastElemDetails, m = window._lastSortedMitsBase;
+  if (e && d && m) renderResults(e, d, m, {});
+}
+
+// ── Expected damage table ─────────────────────────────────────────────────────
+function renderWeaponsTable(elemResults, sortedMits) {
+  const section = document.getElementById('weapons-table-section');
+  const container = document.getElementById('weapons-table-body');
+  if (!WEAPONS_DB.length || !sortedMits.length) { section.style.display = 'none'; return; }
+  const elementsInResults = Object.keys(elemResults);
+  const byElem = {};
+  for (const w of WEAPONS_DB) {
+    if (!elementsInResults.includes(w.element)) continue;
+    if (!byElem[w.element]) byElem[w.element] = [];
+    byElem[w.element].push(w);
+  }
+  if (!Object.keys(byElem).length) { section.style.display = 'none'; return; }
+  for (const list of Object.values(byElem))
+    list.sort((a, b) => ((b.min + b.max) / 2) - ((a.min + a.max) / 2));
+  let html = '';
+  for (const elem of ELEMENTS) {
+    if (!byElem[elem]) continue;
+    html += `<div class="elem-group-label"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span></div>`;
+    html += '<table class="wtable"><thead><tr><th>Weapon</th><th>Raw</th><th>Expected output</th><th></th></tr></thead><tbody>';
+    for (const w of byElem[elem]) {
+      const map = elemResults[elem];
+      const outPairs = new Set();
+      for (const mit of sortedMits) {
+        if (!map.has(mit)) continue;
+        for (const r of map.get(mit)) {
+          const oMin = Math.trunc(Math.round(w.min * r / 100) * (1 - mit / 100));
+          const oMax = Math.trunc(Math.round(w.max * r / 100) * (1 - mit / 100));
+          outPairs.add(`${oMin}–${oMax}`);
+        }
+      }
+      const pairs = [...outPairs];
+      const ambiguous = pairs.length > 1;
+      const display = ambiguous
+        ? pairs.slice(0, 3).join(' or ') + (pairs.length > 3 ? ` (+${pairs.length - 3} more)` : '')
+        : (pairs[0] || '—');
+      html += `<tr class="${ambiguous ? 'ambiguous' : ''}">
+        <td>${w.name}</td>
+        <td>${w.min}–${w.max}</td>
+        <td class="dmg-cell">${display}</td>
+        <td class="hint-cell">${ambiguous ? 'test this weapon' : ''}</td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+  }
+  container.innerHTML = html;
+  section.style.display = '';
+}
+
+addWeapon();
+</script>
+</body>
+</html>
