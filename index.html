@@ -187,6 +187,22 @@
   <h1>Mitigation Solver</h1>
   <div class="subtitle">back-calculate mitigation &amp; elemental resistances from observed damage</div>
 
+  <div class="section" id="creatures-section" style="margin-bottom:1.25rem;">
+    <div class="section-label">Saved creatures</div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <select id="creature-select" style="max-width:220px;">
+        <option value="">— none saved —</option>
+      </select>
+      <button onclick="loadSelectedCreature()">Load</button>
+      <button onclick="deleteSelectedCreature()">Delete</button>
+      <button onclick="startNewCreature()" title="Clear the working area and start tracking a new creature">+ New</button>
+      <span style="flex:1 1 auto; min-width:8px;"></span>
+      <input type="text" id="creature-name-input" placeholder="creature name" style="width:150px;" />
+      <button class="btn-solve" onclick="saveCurrentCreature()">Save current</button>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); font-family:var(--mono); margin-top:6px;" id="state-restored-note"></div>
+  </div>
+
   <div class="solve-bar">
     <button class="btn-solve" onclick="startSolve()">Solve</button>
     <button id="btn-cancel" style="display:none;" onclick="cancelSolve()">Cancel</button>
@@ -224,6 +240,9 @@
   <div class="section" id="weapons-table-section" style="display:none;">
     <div class="section-label">Expected damage by known weapon</div>
     <div style="font-size:12px; color:var(--text-muted); font-family:var(--mono); margin-bottom:10px;">Based on solve results. <span style="color:var(--danger);">Red rows</span> are ambiguous — testing them would help narrow things down.</div>
+    <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:var(--mono); color:var(--text-muted); margin-bottom:10px; cursor:pointer;">
+      <input type="checkbox" id="filter-ambiguous" onchange="refreshWeaponsTableFilter()" /> show ambiguous only
+    </label>
     <div id="weapons-table-body"></div>
   </div>
 
@@ -320,6 +339,164 @@ const ELEM_LABELS = { physical:'Physical', earth:'Earth', fire:'Fire', death:'De
 
 let weapons = [], nextId = 1, cancelFlag = false;
 
+// ── Persistence: current working state ──────────────────────────────────────
+const STATE_KEY = 'mitigationSolverState_v1';
+const CREATURES_KEY = 'mitigationSolverCreatures_v1';
+let saveStateTimer = null;
+
+function debouncedSaveState() {
+  clearTimeout(saveStateTimer);
+  saveStateTimer = setTimeout(saveState, 300);
+}
+
+function currentBounds() {
+  return {
+    rMin: document.getElementById('r-min').value,
+    rMax: document.getElementById('r-max').value,
+    mMax: document.getElementById('m-max').value,
+  };
+}
+
+function saveState() {
+  try {
+    const state = { weapons: getWeaponData(), bounds: currentBounds() };
+    localStorage.setItem(STATE_KEY, JSON.stringify(state));
+  } catch (e) { /* storage unavailable — ignore */ }
+}
+
+function applyBounds(bounds) {
+  if (!bounds) return;
+  if (bounds.rMin !== undefined) document.getElementById('r-min').value = bounds.rMin;
+  if (bounds.rMax !== undefined) document.getElementById('r-max').value = bounds.rMax;
+  if (bounds.mMax !== undefined) document.getElementById('m-max').value = bounds.mMax;
+}
+
+function loadState() {
+  let raw;
+  try { raw = localStorage.getItem(STATE_KEY); } catch (e) { return false; }
+  if (!raw) return false;
+  let state;
+  try { state = JSON.parse(raw); } catch (e) { return false; }
+  if (!state || !Array.isArray(state.weapons) || !state.weapons.length) return false;
+  applyBounds(state.bounds);
+  for (const w of state.weapons) addWeapon(w);
+  const note = document.getElementById('state-restored-note');
+  if (note) note.textContent = 'Restored your last session — click Solve to recompute results.';
+  return true;
+}
+
+// ── Persistence: saved creatures ────────────────────────────────────────────
+function loadCreatures() {
+  try { return JSON.parse(localStorage.getItem(CREATURES_KEY) || '{}'); } catch (e) { return {}; }
+}
+
+function persistCreatures(creatures) {
+  try { localStorage.setItem(CREATURES_KEY, JSON.stringify(creatures)); } catch (e) { /* ignore */ }
+}
+
+function renderCreaturesList() {
+  const sel = document.getElementById('creature-select');
+  const creatures = loadCreatures();
+  const names = Object.keys(creatures).sort((a, b) => a.localeCompare(b));
+  const prevValue = sel.value;
+  sel.innerHTML = names.length
+    ? names.map(n => `<option value="${n}">${n} (${creatures[n].weapons.length} weapon${creatures[n].weapons.length !== 1 ? 's' : ''})</option>`).join('')
+    : '<option value="">— none saved —</option>';
+  if (names.includes(prevValue)) sel.value = prevValue;
+}
+
+function saveCurrentCreature() {
+  const input = document.getElementById('creature-name-input');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  const data = getWeaponData();
+  if (!data.length) { alert('Add at least one weapon before saving a creature.'); return; }
+  const creatures = loadCreatures();
+  creatures[name] = { weapons: data, bounds: currentBounds() };
+  persistCreatures(creatures);
+  input.value = '';
+  renderCreaturesList();
+  document.getElementById('creature-select').value = name;
+}
+
+function loadSelectedCreature() {
+  const name = document.getElementById('creature-select').value;
+  if (!name) return;
+  const creatures = loadCreatures();
+  const creature = creatures[name];
+  if (!creature) return;
+  weapons.forEach(id => document.getElementById('weapon-' + id)?.remove());
+  weapons = [];
+  applyBounds(creature.bounds);
+  for (const w of creature.weapons) addWeapon(w);
+  const note = document.getElementById('state-restored-note');
+  if (note) note.textContent = `Loaded "${name}" — click Solve to recompute results.`;
+}
+
+function deleteSelectedCreature() {
+  const sel = document.getElementById('creature-select');
+  const name = sel.value;
+  if (!name) return;
+  if (!confirm(`Delete saved creature "${name}"?`)) return;
+  const creatures = loadCreatures();
+  delete creatures[name];
+  persistCreatures(creatures);
+  renderCreaturesList();
+}
+
+function startNewCreature() {
+  const hasData = weapons.some(id => {
+    const card = document.getElementById('weapon-' + id);
+    if (!card) return false;
+    return ['.raw-min', '.raw-max', '.obs-min', '.obs-max'].some(sel => card.querySelector(sel).value !== '');
+  });
+  if (hasData && !confirm('Start a new blank creature? Anything not saved will be cleared. (Saved creatures are untouched.)')) return;
+
+  weapons.forEach(id => document.getElementById('weapon-' + id)?.remove());
+  weapons = [];
+  addWeapon();
+
+  document.getElementById('creature-select').value = '';
+  document.getElementById('creature-name-input').value = '';
+  document.getElementById('result-area').innerHTML = '';
+  document.getElementById('weapons-table-section').style.display = 'none';
+
+  const note = document.getElementById('state-restored-note');
+  if (note) note.textContent = 'Started a new blank creature — ready to enter weapons.';
+
+  saveState();
+}
+
+// ── Keyboard flow ────────────────────────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    startSolve();
+    return;
+  }
+  if (e.key !== 'Enter') return;
+  const target = e.target;
+  if (!target.matches('.weapon-card input')) return;
+  const card = target.closest('.weapon-card');
+  const inputs = [...card.querySelectorAll('input')];
+  const idx = inputs.indexOf(target);
+  if (idx === -1) return;
+  e.preventDefault();
+  if (idx < inputs.length - 1) { inputs[idx + 1].focus(); return; }
+  // last field of this card — move to next card, or add a new one
+  const cardId = parseInt(card.id.replace('weapon-', ''));
+  const posInList = weapons.indexOf(cardId);
+  if (posInList > -1 && posInList < weapons.length - 1) {
+    document.getElementById('weapon-' + weapons[posInList + 1])?.querySelector('.raw-min')?.focus();
+  } else {
+    addWeapon();
+    document.getElementById('weapon-' + weapons[weapons.length - 1])?.querySelector('.raw-min')?.focus();
+  }
+});
+document.getElementById('weapons-list').addEventListener('input', debouncedSaveState);
+document.getElementById('weapons-list').addEventListener('change', debouncedSaveState);
+['r-min', 'r-max', 'm-max'].forEach(id => document.getElementById(id).addEventListener('input', debouncedSaveState));
+
 // ── Theme ────────────────────────────────────────────────────────────────────
 function toggleTheme() {
   const dark = document.documentElement.classList.toggle('dark');
@@ -378,7 +555,7 @@ function useLogValues() {
 }
 
 // ── Weapon cards ─────────────────────────────────────────────────────────────
-function addWeapon() {
+function addWeapon(prefill) {
   const id = nextId++;
   weapons.push(id);
   const card = document.createElement('div');
@@ -431,6 +608,20 @@ function addWeapon() {
       </div>
     </div>`;
   document.getElementById('weapons-list').appendChild(card);
+
+  if (prefill) {
+    if (prefill.presetValue) {
+      const presetSel = card.querySelector('.preset-select');
+      const optionExists = [...presetSel.options].some(o => o.value === prefill.presetValue);
+      if (optionExists) presetSel.value = prefill.presetValue;
+    }
+    if (prefill.element) card.querySelector('.elem-select').value = prefill.element;
+    if (prefill.rawMin !== undefined && prefill.rawMin !== null && !isNaN(prefill.rawMin)) card.querySelector('.raw-min').value = prefill.rawMin;
+    if (prefill.rawMax !== undefined && prefill.rawMax !== null && !isNaN(prefill.rawMax)) card.querySelector('.raw-max').value = prefill.rawMax;
+    if (prefill.obsMin !== undefined && prefill.obsMin !== null && !isNaN(prefill.obsMin)) card.querySelector('.obs-min').value = prefill.obsMin;
+    if (prefill.obsMax !== undefined && prefill.obsMax !== null && !isNaN(prefill.obsMax)) card.querySelector('.obs-max').value = prefill.obsMax;
+  }
+  debouncedSaveState();
 }
 
 function applyPreset(id, sel) {
@@ -446,17 +637,24 @@ function removeWeapon(id) {
   weapons = weapons.filter(w => w !== id);
   document.getElementById('weapon-' + id)?.remove();
   weapons.forEach((wid, i) => { const l = document.getElementById('wlabel-' + wid); if (l) l.textContent = '#' + (i + 1); });
+  debouncedSaveState();
 }
 
 function getWeaponData() {
-  return weapons.map(id => {
+  return weapons.map((id, i) => {
     const row = document.getElementById('weapon-' + id);
+    const presetSel = row.querySelector('.preset-select');
+    const presetLabel = presetSel && presetSel.value ? presetSel.selectedOptions[0].textContent : '';
+    const presetValue = presetSel ? presetSel.value : '';
+    const element = row.querySelector('.elem-select').value;
+    const rawMin = parseFloat(row.querySelector('.raw-min').value);
+    const rawMax = parseFloat(row.querySelector('.raw-max').value);
     return {
-      element: row.querySelector('.elem-select').value,
-      rawMin:  parseFloat(row.querySelector('.raw-min').value),
-      rawMax:  parseFloat(row.querySelector('.raw-max').value),
+      element, rawMin, rawMax,
       obsMin:  parseFloat(row.querySelector('.obs-min').value),
       obsMax:  parseFloat(row.querySelector('.obs-max').value),
+      name: presetLabel || `${ELEM_LABELS[element] || element} #${i + 1} (${isNaN(rawMin)?'?':rawMin}–${isNaN(rawMax)?'?':rawMax})`,
+      presetValue,
     };
   });
 }
@@ -464,6 +662,13 @@ function getWeaponData() {
 // ── Solver ────────────────────────────────────────────────────────────────────
 function applyFormula(raw, resist, mit) {
   return Math.trunc(Math.round(raw * resist / 100) * (1 - mit / 100));
+}
+
+function countPairs(map) {
+  if (!map) return 0;
+  let total = 0;
+  for (const set of map.values()) total += set.size;
+  return total;
 }
 
 function intersectMaps(a, b) {
@@ -536,13 +741,15 @@ async function startSolve() {
     document.getElementById('progress-text').textContent = `Processing ${ELEM_LABELS[elem]} (${ei+1}/${elements.length})…`;
     document.getElementById('progress-fill').style.width = `${Math.round(ei / elements.length * 100)}%`;
     let combined = null;
+    const history = [];
     for (const w of byElement[elem]) {
       if (cancelFlag) return;
       await new Promise(r => setTimeout(r, 0));
       combined = intersectMaps(combined, pairsForWeapon(w, rMin, rMax, mMax));
+      history.push({ name: w.name, count: countPairs(combined) });
     }
     elemResults[elem] = combined || new Map();
-    elemDetails[elem] = { weaponCount: byElement[elem].length, pairCount: elemResults[elem].size };
+    elemDetails[elem] = { weaponCount: byElement[elem].length, pairCount: elemResults[elem].size, history };
   }
 
   document.getElementById('progress-fill').style.width = '100%';
@@ -610,6 +817,24 @@ function renderResults(elemResults, elemDetails, sortedMits, pins) {
   if (sortedMits.length > 1)
     html += '<div class="result-box warn" style="font-size:13px;">Multiple solutions remain — add more weapons, or pin a known resistance below.</div>';
 
+  const hasHistory = Object.values(elemDetails).some(d => d.history && d.history.length > 0);
+  if (hasHistory) {
+    html += '<details class="result-section"><summary class="section-label" style="margin-bottom:8px; cursor:pointer;">Confidence — candidates remaining per weapon</summary>';
+    for (const [elem, det] of Object.entries(elemDetails)) {
+      if (!det.history || !det.history.length) continue;
+      html += `<div class="elem-group-label"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span></div>`;
+      html += '<table class="wtable"><thead><tr><th>Weapon added</th><th>Candidates remaining</th></tr></thead><tbody>';
+      let prev = null;
+      for (const step of det.history) {
+        const delta = prev !== null ? ` <span style="color:var(--text-muted);">(−${(prev - step.count).toLocaleString()})</span>` : '';
+        html += `<tr><td>${step.name}</td><td>${step.count.toLocaleString()}${delta}</td></tr>`;
+        prev = step.count;
+      }
+      html += '</tbody></table>';
+    }
+    html += '</details>';
+  }
+
   html += '<div class="result-section" style="margin-top:1.5rem;">';
   html += '<div class="section-label" style="margin-bottom:6px;">Pin known resistances</div>';
   html += '<div style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:10px;">Enter the exact resist % for any element you already know, then apply.</div>';
@@ -662,10 +887,19 @@ function clearPins() {
 }
 
 // ── Expected damage table ─────────────────────────────────────────────────────
+function refreshWeaponsTableFilter() {
+  if (window._lastTableElemResults && window._lastTableSortedMits) {
+    renderWeaponsTable(window._lastTableElemResults, window._lastTableSortedMits);
+  }
+}
+
 function renderWeaponsTable(elemResults, sortedMits) {
+  window._lastTableElemResults = elemResults;
+  window._lastTableSortedMits = sortedMits;
   const section = document.getElementById('weapons-table-section');
   const container = document.getElementById('weapons-table-body');
   if (!WEAPONS_DB.length || !sortedMits.length) { section.style.display = 'none'; return; }
+  const ambiguousOnly = document.getElementById('filter-ambiguous')?.checked;
   const elementsInResults = Object.keys(elemResults);
   const byElem = {};
   for (const w of WEAPONS_DB) {
@@ -679,8 +913,7 @@ function renderWeaponsTable(elemResults, sortedMits) {
   let html = '';
   for (const elem of ELEMENTS) {
     if (!byElem[elem]) continue;
-    html += `<div class="elem-group-label"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span></div>`;
-    html += '<table class="wtable"><thead><tr><th>Weapon</th><th>Raw</th><th>Expected output</th><th></th></tr></thead><tbody>';
+    const rows = [];
     for (const w of byElem[elem]) {
       const map = elemResults[elem];
       const outPairs = new Set();
@@ -694,23 +927,34 @@ function renderWeaponsTable(elemResults, sortedMits) {
       }
       const pairs = [...outPairs];
       const ambiguous = pairs.length > 1;
+      if (ambiguousOnly && !ambiguous) continue;
       const display = ambiguous
         ? pairs.slice(0, 3).join(' or ') + (pairs.length > 3 ? ` (+${pairs.length - 3} more)` : '')
         : (pairs[0] || '—');
-      html += `<tr class="${ambiguous ? 'ambiguous' : ''}">
+      rows.push(`<tr class="${ambiguous ? 'ambiguous' : ''}">
         <td>${w.name}</td>
         <td>${w.min}–${w.max}</td>
         <td class="dmg-cell">${display}</td>
         <td class="hint-cell">${ambiguous ? 'test this weapon' : ''}</td>
-      </tr>`;
+      </tr>`);
     }
+    if (!rows.length) continue;
+    html += `<div class="elem-group-label"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span></div>`;
+    html += '<table class="wtable"><thead><tr><th>Weapon</th><th>Raw</th><th>Expected output</th><th></th></tr></thead><tbody>';
+    html += rows.join('');
     html += '</tbody></table>';
   }
+  if (!html) html = `<div style="font-size:12px; color:var(--text-muted); font-family:var(--mono);">No ambiguous weapons remain for the elements you tested.</div>`;
   container.innerHTML = html;
   section.style.display = '';
 }
 
-addWeapon();
+function initApp() {
+  renderCreaturesList();
+  const restored = loadState();
+  if (!restored) addWeapon();
+}
+initApp();
 </script>
 </body>
 </html>
