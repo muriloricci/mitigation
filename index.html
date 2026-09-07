@@ -105,6 +105,7 @@
   .weapon-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; margin-bottom: 8px; }
   .weapon-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
   .weapon-num { font-size: 12px; font-family: var(--mono); color: var(--text-muted); flex-shrink: 0; }
+  .weapon-name { font-size: 12px; font-family: var(--mono); color: var(--accent-text); flex: 1; margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .weapon-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
   .field-group { display: flex; flex-direction: column; gap: 4px; }
   .field-group label { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
@@ -177,6 +178,20 @@
   .log-result-val { font-weight: bold; font-size: 16px; }
   .log-count { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
   .log-clear { font-size: 11px; margin-top: 8px; padding: 3px 10px; }
+
+  /* Character lookup */
+  .char-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; margin-bottom: 10px; }
+  .char-fields { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; margin-bottom: 10px; }
+  details.adv { margin-bottom: 10px; }
+  details.adv summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-family: var(--mono); margin-bottom: 6px; }
+  .json-textarea {
+    width: 100%; min-height: 110px; background: var(--surface2); border: 1px solid var(--border-strong);
+    border-radius: 4px; padding: 8px; font-size: 12px; font-family: var(--mono); color: var(--text);
+    resize: vertical; outline: none; line-height: 1.5; margin-top: 6px;
+  }
+  .json-textarea:focus { border-color: var(--accent); }
+  .char-status { font-size: 11px; color: var(--text-muted); font-family: var(--mono); margin-top: 6px; min-height: 14px; }
+  .skipped-list { font-size: 12px; color: var(--text-muted); font-family: var(--mono); }
 </style>
 </head>
 <body>
@@ -202,6 +217,42 @@
     </div>
     <div style="font-size:11px; color:var(--text-muted); font-family:var(--mono); margin-top:6px;" id="state-restored-note"></div>
   </div>
+
+  <details class="section" id="characters-section" style="margin-bottom:1.25rem;">
+    <summary class="section-label" style="cursor:pointer;">Advanced: Character spell lookup (Tibia Tools)</summary>
+
+    <div class="char-card" style="margin-top:10px;">
+      <div class="char-fields">
+        <div class="field-group"><label>Vocation</label>
+          <select id="char-vocation">
+            <option value="druid">Druid</option>
+            <option value="sorcerer">Sorcerer</option>
+            <option value="knight">Knight</option>
+            <option value="paladin">Paladin</option>
+            <option value="monk">Monk</option>
+          </select>
+        </div>
+        <div class="field-group"><label>Level</label><input type="number" id="char-level" value="437" style="width:80px;" /></div>
+        <div class="field-group"><label>Magic level</label><input type="number" id="char-magiclevel" value="107" style="width:80px;" /></div>
+        <div class="field-group"><label>Wheel damage</label><input type="number" id="char-bonus" value="0" step="1" style="width:80px;" /></div>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <button class="btn-solve" onclick="fetchCharacterDamage()">Fetch from Tibia Tools</button>
+        <span id="char-fetch-status" style="font-size:12px; font-family:var(--mono); color:var(--text-muted);"></span>
+      </div>
+      <div class="char-status">Tries a direct request first, then a CORS proxy if that's blocked. If both fail, paste the JSON response below instead.</div>
+
+      <details class="adv">
+        <summary>Paste API response JSON manually</summary>
+        <textarea class="json-textarea" id="char-paste-json" placeholder="Paste the full JSON response from https://tibiatools.io/api/v1/damage here"></textarea>
+        <button style="margin-top:6px;" onclick="parsePastedResponse()">Parse pasted response</button>
+      </details>
+
+      <div id="spell-results" style="margin-top:10px;"></div>
+    </div>
+  </details>
+
 
   <div class="solve-bar">
     <button class="btn-solve" onclick="startSolve()">Solve</button>
@@ -561,6 +612,7 @@ function addWeapon(prefill) {
   const card = document.createElement('div');
   card.className = 'weapon-card';
   card.id = 'weapon-' + id;
+  card.dataset.customName = (prefill && prefill.customName) ? prefill.customName : '';
 
   // Build preset options grouped by element
   let presetOpts = '<option value="">— custom —</option>';
@@ -578,6 +630,7 @@ function addWeapon(prefill) {
   card.innerHTML = `
     <div class="weapon-header">
       <span class="weapon-num" id="wlabel-${id}">#${weapons.length}</span>
+      <span class="weapon-name" id="wname-${id}">${card.dataset.customName || ''}</span>
       <button class="btn-remove" onclick="removeWeapon(${id})">×</button>
     </div>
     <div class="weapon-preset-row">
@@ -646,6 +699,7 @@ function getWeaponData() {
     const presetSel = row.querySelector('.preset-select');
     const presetLabel = presetSel && presetSel.value ? presetSel.selectedOptions[0].textContent : '';
     const presetValue = presetSel ? presetSel.value : '';
+    const customName = row.dataset.customName || '';
     const element = row.querySelector('.elem-select').value;
     const rawMin = parseFloat(row.querySelector('.raw-min').value);
     const rawMax = parseFloat(row.querySelector('.raw-max').value);
@@ -653,8 +707,9 @@ function getWeaponData() {
       element, rawMin, rawMax,
       obsMin:  parseFloat(row.querySelector('.obs-min').value),
       obsMax:  parseFloat(row.querySelector('.obs-max').value),
-      name: presetLabel || `${ELEM_LABELS[element] || element} #${i + 1} (${isNaN(rawMin)?'?':rawMin}–${isNaN(rawMax)?'?':rawMax})`,
+      name: customName || presetLabel || `${ELEM_LABELS[element] || element} #${i + 1} (${isNaN(rawMin)?'?':rawMin}–${isNaN(rawMax)?'?':rawMax})`,
       presetValue,
+      customName,
     };
   });
 }
@@ -898,11 +953,12 @@ function renderWeaponsTable(elemResults, sortedMits) {
   window._lastTableSortedMits = sortedMits;
   const section = document.getElementById('weapons-table-section');
   const container = document.getElementById('weapons-table-body');
-  if (!WEAPONS_DB.length || !sortedMits.length) { section.style.display = 'none'; return; }
+  const combinedDB = WEAPONS_DB.concat([...fetchedSpellsMap.values()]);
+  if (!combinedDB.length || !sortedMits.length) { section.style.display = 'none'; return; }
   const ambiguousOnly = document.getElementById('filter-ambiguous')?.checked;
   const elementsInResults = Object.keys(elemResults);
   const byElem = {};
-  for (const w of WEAPONS_DB) {
+  for (const w of combinedDB) {
     if (!elementsInResults.includes(w.element)) continue;
     if (!byElem[w.element]) byElem[w.element] = [];
     byElem[w.element].push(w);
@@ -947,6 +1003,226 @@ function renderWeaponsTable(elemResults, sortedMits) {
   if (!html) html = `<div style="font-size:12px; color:var(--text-muted); font-family:var(--mono);">No ambiguous weapons remain for the elements you tested.</div>`;
   container.innerHTML = html;
   section.style.display = '';
+}
+
+// ── Characters: Tibia Tools damage lookup ─────────────────────────────────────
+
+// Spell/rune name (lowercase, exact as returned by the API) -> element.
+// Not exhaustive — only entries we're confident about. Anything not listed
+// here is skipped rather than guessed; extend this map as you confirm more.
+const SPELL_ELEMENTS = {
+  // Knight abilities (weapon-based, physical)
+  "fierce berserk": "physical",
+  "front sweep": "physical",
+  "berserk": "physical",
+  "groundshaker": "physical",
+  "executioner's throw (no bonus)": "physical",
+  "executioner's throw (stage 1)": "physical",
+  "executioner's throw (stage 2)": "physical",
+  "executioner's throw (stage 3)": "physical",
+  "shield slam": "physical",
+  "shield bash": "physical",
+  "annihilation": "physical",
+  "brutal strike": "physical",
+  "whirlwind throw": "physical",
+  // Runes
+  "avalanche rune": "ice",
+  "great fireball rune": "fire",
+  "thunderstorm rune": "energy",
+  "stone shower rune": "earth",
+  "explosion rune": "physical",
+  "sudden death rune": "death",
+  "icicle rune": "ice",
+  "fireball rune": "fire",
+  "stalagmite rune": "earth",
+  "heavy magic missile rune": "energy",
+  "light magic missile rune": "energy",
+  // Common druid/sorcerer/paladin spells
+  "terra strike": "earth",
+  "ice strike": "ice",
+  "terra wave": "earth",
+  "ice wave": "ice",
+  "eternal winter": "ice",
+  "strong ice wave": "ice",
+  "energy strike": "energy",
+  "energy wave": "energy",
+  "energy beam": "energy",
+  "rage of the skies": "energy",
+  "great fireball": "fire",
+  "fire wave": "fire",
+  "fire strike": "fire",
+  "death strike": "death",
+  "sudden death": "death",
+  "ethereal spear": "physical",
+  "divine missile": "holy",
+  "divine caldera": "holy",
+  "forked thorns": "earth",
+  "forked glacier": "ice",
+  "ice burst (no bonus)": "ice",
+  "ice burst (stage 1)": "ice",
+  "ice burst (stage 2)": "ice",
+  "ice burst (stage 3)": "ice",
+  "terra burst (no bonus)": "earth",
+  "terra burst (stage 1)": "earth",
+  "terra burst (stage 2)": "earth",
+  "terra burst (stage 3)": "earth",
+  "wrath of nature": "earth",
+  "flame strike": "fire",
+  "death echo": "death",
+  "great fire wave": "fire",
+  "hell's core": "fire",
+  "great death beam (central)": "death",
+  "great death beam (stage 1 sides)": "death",
+  "great death beam (stage 2 sides)": "death",
+  "great death beam (stage 3 sides)": "death",
+  "great energy beam (central)": "energy",
+  "great energy beam (stage 1 sides)": "energy",
+  "great energy beam (stage 2 sides)": "energy",
+  "great energy beam (stage 3 sides)": "energy",
+  "divine grenade (stage 1)": "holy",
+  "divine grenade (stage 2)": "holy",
+  "divine grenade (stage 3)": "holy",
+  "ethereal barrage": "physical",
+  "divine barrage": "holy",
+  "strong ethereal spear": "physical",
+  "holy missile rune": "holy"
+};
+
+// name -> {name, element, min, max}. In-memory only — never persisted.
+// Cleared and replaced on every fetch/parse, so it always reflects only the
+// character currently in the form, and a page refresh drops it entirely.
+let fetchedSpellsMap = new Map();
+
+
+function getCharacterForm() {
+  return {
+    vocation: document.getElementById('char-vocation').value,
+    level: parseInt(document.getElementById('char-level').value) || 0,
+    magicLevel: parseInt(document.getElementById('char-magiclevel').value) || 0,
+    bonus: parseInt(document.getElementById('char-bonus').value) || 0,
+    skill: 0,
+    critChance: 10,
+    critDamage: 50,
+  };
+}
+
+function buildRequestBody() {
+  const form = getCharacterForm();
+  return {
+    stats: {
+      vocation: form.vocation,
+      level: form.level,
+      bonus: form.bonus,
+      skill: form.skill,
+      magicLevel: form.magicLevel,
+      critChance: form.critChance,
+      critDamage: form.critDamage,
+    },
+  };
+  return body;
+}
+
+const TIBIATOOLS_URL = 'https://tibiatools.io/api/v1/damage';
+// Public CORS proxy used only as a fallback when the direct request is
+// blocked by the browser (tibiatools.io doesn't send CORS headers for
+// cross-origin requests). This forwards the request server-side and adds
+// the missing headers to the response.
+const CORS_PROXY_URL = 'https://corsproxy.io/?url=' + encodeURIComponent(TIBIATOOLS_URL);
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+async function fetchCharacterDamage() {
+  const statusEl = document.getElementById('char-fetch-status');
+  const body = buildRequestBody();
+
+  statusEl.textContent = 'Requesting directly…';
+  try {
+    const data = await postJson(TIBIATOOLS_URL, body);
+    statusEl.textContent = `Got ${data.spells ? data.spells.length : 0} spell(s) (direct).`;
+    renderSpellResults(data);
+    return;
+  } catch (e) {
+    // Likely a CORS block — fall through to the proxy.
+  }
+
+  statusEl.textContent = 'Direct request blocked — retrying via CORS proxy…';
+  try {
+    const data = await postJson(CORS_PROXY_URL, body);
+    statusEl.textContent = `Got ${data.spells ? data.spells.length : 0} spell(s) (via proxy).`;
+    renderSpellResults(data);
+  } catch (e) {
+    statusEl.textContent = 'Both direct and proxy requests failed. Use the paste option below.';
+  }
+}
+
+function parsePastedResponse() {
+  const statusEl = document.getElementById('char-fetch-status');
+  const raw = document.getElementById('char-paste-json').value;
+  let data;
+  try { data = JSON.parse(raw); }
+  catch (e) { statusEl.textContent = 'Pasted text is not valid JSON.'; return; }
+  statusEl.textContent = `Parsed ${data.spells ? data.spells.length : 0} spell(s) from pasted response.`;
+  renderSpellResults(data);
+}
+
+function renderSpellResults(data) {
+  const statusEl = document.getElementById('char-fetch-status');
+  const container = document.getElementById('spell-results');
+  const spells = (data && Array.isArray(data.spells)) ? data.spells : [];
+
+  // Every fetch/parse represents one character's numbers - replace whatever
+  // was there before rather than accumulating across characters.
+  fetchedSpellsMap.clear();
+
+  if (!spells.length) {
+    container.innerHTML = '';
+    statusEl.textContent = 'No spells in response.';
+    if (window._lastTableElemResults && window._lastTableSortedMits) renderWeaponsTable(window._lastTableElemResults, window._lastTableSortedMits);
+    return;
+  }
+
+  let added = 0;
+  const skippedExcluded = []; // auto-attack / null min or max
+  const skippedUnmapped = []; // no entry in SPELL_ELEMENTS
+
+  for (const s of spells) {
+    const nameLower = (s.name || '').toLowerCase();
+    if (nameLower.includes('auto-attack')) { skippedExcluded.push(s.name); continue; }
+    if (!s.raw || s.raw.min === null || s.raw.max === null || s.raw.min === undefined || s.raw.max === undefined) {
+      skippedExcluded.push(s.name); continue;
+    }
+    if (s.raw.min === 0 && s.raw.max === 0) { skippedExcluded.push(s.name); continue; } // unused/unequipped skill
+    const elem = SPELL_ELEMENTS[nameLower];
+    if (!elem) { skippedUnmapped.push(s.name); continue; }
+    fetchedSpellsMap.set(s.name, { name: s.name, element: elem, min: s.raw.min, max: s.raw.max });
+    added++;
+  }
+
+  statusEl.textContent = `Added ${added} spell(s) to the expected-damage list`
+    + (skippedExcluded.length ? `, ${skippedExcluded.length} excluded (auto-attack/null/zero)` : '')
+    + (skippedUnmapped.length ? `, ${skippedUnmapped.length} skipped (no element mapping)` : '') + '.';
+
+  let html = '';
+  if (skippedUnmapped.length) {
+    html += `<details class="adv"><summary>No element mapping (${skippedUnmapped.length}) — add these to SPELL_ELEMENTS in the code</summary><div class="skipped-list">${skippedUnmapped.join(', ')}</div></details>`;
+  }
+  container.innerHTML = html;
+
+  // If a solve has already run, refresh the expected-damage table immediately
+  // so the newly added spells show up without re-clicking Solve.
+  if (window._lastTableElemResults && window._lastTableSortedMits) {
+    renderWeaponsTable(window._lastTableElemResults, window._lastTableSortedMits);
+  } else if (added > 0) {
+    statusEl.textContent += ' Click Solve to see them in the expected-damage table.';
+  }
 }
 
 function initApp() {
