@@ -442,13 +442,17 @@ const SPELL_BUCKETS = {
   "homing missile (death)": 0,
 };
 
-// Buckets = distinct achievable raw values. Weapons always cover their full
-// [min,max] range (continuous), same as any spell not in SPELL_BUCKETS or
-// listed there with 0 (no bucket data / not bucketed).
+// Buckets = distinct achievable raw values.
+// - Weapons always cover their full [min,max] range (continuous), so
+//   buckets = max - min.
+// - Spells only get a bucket count if they're explicitly in SPELL_BUCKETS
+//   (and it's > 0). No entry there = no bucket info at all - returns null
+//   rather than guessing via max-min, since spells are NOT necessarily
+//   continuous the way weapons are.
 function getBuckets(item) {
+  if (item.isWeapon) return Math.max(0, item.max - item.min);
   const known = SPELL_BUCKETS[(item.name || '').toLowerCase()];
-  if (known) return known;
-  return Math.max(0, item.max - item.min);
+  return known ? known : null;
 }
 
 const ELEMENTS = ['physical','earth','fire','death','energy','holy','ice'];
@@ -1027,7 +1031,8 @@ function renderWeaponsTable(elemResults, sortedMits) {
   window._lastTableSortedMits = sortedMits;
   const section = document.getElementById('weapons-table-section');
   const container = document.getElementById('weapons-table-body');
-  const combinedDB = WEAPONS_DB.concat([...fetchedSpellsMap.values()]);
+  const combinedDB = WEAPONS_DB.map(w => ({ ...w, isWeapon: true }))
+    .concat([...fetchedSpellsMap.values()].map(s => ({ ...s, isWeapon: false })));
   if (!combinedDB.length || !sortedMits.length) { section.style.display = 'none'; return; }
   const ambiguousOnly = document.getElementById('filter-ambiguous')?.checked;
   const elementsInResults = Object.keys(elemResults);
@@ -1065,12 +1070,15 @@ function renderWeaponsTable(elemResults, sortedMits) {
       if (ambiguous) ambiguousItems.push({ w, buckets: getBuckets(w) });
       rows.push({ w, display, ambiguous });
     }
-    const minBuckets = ambiguousItems.length ? Math.min(...ambiguousItems.map(i => i.buckets)) : null;
+    const knownBucketValues = ambiguousItems.map(i => i.buckets).filter(b => b !== null);
+    const minBuckets = knownBucketValues.length ? Math.min(...knownBucketValues) : null;
     const rowsHtml = rows.map(({ w, display, ambiguous }) => {
       let hint = '';
       if (ambiguous) {
         const buckets = getBuckets(w);
-        hint = `${buckets} bucket${buckets === 1 ? '' : 's'}` + (buckets === minBuckets ? ' — easiest to test' : '');
+        if (buckets !== null) {
+          hint = `${buckets} bucket${buckets === 1 ? '' : 's'}` + (buckets === minBuckets ? ' — easiest to test' : '');
+        }
       }
       return `<tr class="${ambiguous ? 'ambiguous' : ''}">
         <td>${w.name}</td>
