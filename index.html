@@ -322,6 +322,18 @@
 
 <script>
 // ── Weapon database ──────────────────────────────────────────────────────────
+// Shared name normalizer for all spell name -> data lookups (SPELL_ELEMENTS,
+// SPELL_RAW_TRANSFORMS, SPELL_BUCKETS). Trims, lowercases, and folds curly
+// apostrophes to straight ones so small formatting differences between what
+// the API returns and what's hardcoded here don't cause a silent miss.
+function normalizeSpellName(name) {
+  return (name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\s+/g, ' ');
+}
+
 const WEAPONS_DB = [
   // Physical
   { "name": "crypt jaw",                    "element": "physical", "min": 85,  "max": 135 },
@@ -451,7 +463,7 @@ const SPELL_BUCKETS = {
 //   continuous the way weapons are.
 function getBuckets(item) {
   if (item.isWeapon) return Math.max(0, item.max - item.min);
-  const known = SPELL_BUCKETS[(item.name || '').toLowerCase()];
+  const known = SPELL_BUCKETS[normalizeSpellName(item.name)];
   return known ? known : null;
 }
 
@@ -1295,7 +1307,7 @@ function renderSpellResults(data) {
   const skippedUnmapped = []; // no entry in SPELL_ELEMENTS
 
   for (const s of spells) {
-    const nameLower = (s.name || '').toLowerCase();
+    const nameLower = normalizeSpellName(s.name);
     if (nameLower.includes('auto-attack')) { skippedExcluded.push(s.name); continue; }
     if (!s.raw || s.raw.min === null || s.raw.max === null || s.raw.min === undefined || s.raw.max === undefined) {
       skippedExcluded.push(s.name); continue;
