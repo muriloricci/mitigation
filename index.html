@@ -290,7 +290,7 @@
 
   <div class="section" id="weapons-table-section" style="display:none;">
     <div class="section-label">Expected damage by known weapon</div>
-    <div style="font-size:12px; color:var(--text-muted); font-family:var(--mono); margin-bottom:10px;">Based on solve results. <span style="color:var(--danger);">Red rows</span> are ambiguous — testing them would help narrow things down.</div>
+    <div style="font-size:12px; color:var(--text-muted); font-family:var(--mono); margin-bottom:10px;">Based on solve results. <span style="color:var(--danger);">Red rows</span> are ambiguous — testing them would help narrow things down. The row marked "easiest to test" in each element needs the fewest unique hits to fully pin down.</div>
     <label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:var(--mono); color:var(--text-muted); margin-bottom:10px; cursor:pointer;">
       <input type="checkbox" id="filter-ambiguous" onchange="refreshWeaponsTableFilter()" /> show ambiguous only
     </label>
@@ -384,6 +384,72 @@ const WEAPONS_DB = [
   { "name": "soulhexer",                "element": "ice",      "min": 98,  "max": 118 },
   { "name": "moonsilver sceptre",       "element": "ice",      "min": 103,  "max": 127 },
 ];
+
+// Number of distinct raw-damage values a spell can actually produce, from
+// Tibia Tools' own spell data. Fewer buckets = fewer unique hits needed to
+// fully characterize that spell, so it's the cheapest thing to go test.
+// A value of 0 means "no bucket info" - treated as continuous (same as a
+// weapon: every integer in [min,max] is reachable). Only fire/energy/holy/
+// death are covered here (that's what was shared) - anything else falls
+// back to the continuous assumption below.
+const SPELL_BUCKETS = {
+  // Fire
+  "great fire wave": 50,
+  "hell's core": 100,
+  "fire wave": 0,
+  "strong flame strike": 0,
+  "ultimate flame strike": 0,
+  "flame strike": 20,
+  "great fireball rune": 40,
+  "fireball rune": 30,
+  "homing missile (fire)": 0,
+  // Energy
+  "energy wave": 80,
+  "rage of the skies": 0,
+  "great energy beam (central)": 60,
+  "strong energy strike": 0,
+  "ultimate energy strike": 0,
+  "energy beam (central)": 0,
+  "lightning": 0,
+  "energy strike": 20,
+  "thunderstorm rune": 40,
+  "heavy magic missile rune": 20,
+  "light magic missile rune": 10,
+  "great energy beam (stage 1 sides)": 60,
+  "great energy beam (stage 2 sides)": 60,
+  "great energy beam (stage 3 sides)": 60,
+  "energy beam (stage 1 sides)": 0,
+  "energy beam (stage 2 sides)": 0,
+  "energy beam (stage 3 sides)": 0,
+  "homing missile (energy)": 0,
+  // Holy
+  "divine caldera": 40,
+  "divine grenade (stage 1)": 100,
+  "divine grenade (stage 2)": 100,
+  "divine grenade (stage 3)": 100,
+  "divine missile": 30,
+  "holy missile rune": 50,
+  "divine barrage": 20,
+  "homing missile (holy)": 0,
+  // Death
+  "great death beam (central)": 50,
+  "death strike": 20,
+  "sudden death rune": 70,
+  "death echo": 4,
+  "great death beam (stage 1 sides)": 50,
+  "great death beam (stage 2 sides)": 50,
+  "great death beam (stage 3 sides)": 50,
+  "homing missile (death)": 0,
+};
+
+// Buckets = distinct achievable raw values. Weapons always cover their full
+// [min,max] range (continuous), same as any spell not in SPELL_BUCKETS or
+// listed there with 0 (no bucket data / not bucketed).
+function getBuckets(item) {
+  const known = SPELL_BUCKETS[(item.name || '').toLowerCase()];
+  if (known) return known;
+  return Math.max(0, item.max - item.min);
+}
 
 const ELEMENTS = ['physical','earth','fire','death','energy','holy','ice'];
 const ELEM_LABELS = { physical:'Physical', earth:'Earth', fire:'Fire', death:'Death', energy:'Energy', holy:'Holy', ice:'Ice' };
@@ -566,12 +632,17 @@ function toggleTheme() {
 })();
 
 // ── Log analyser ─────────────────────────────────────────────────────────────
-const LOG_RE = /.+loses (\d+) hitpoints due to your attack\./;
+// Anchored to end-of-line: a line like "...due to your attack. (freeze charm)"
+// has trailing content after the period and will NOT match, so bonus-damage
+// sources (charms, bounty talisman, onslaught, etc.) are excluded. Only a
+// plain "...due to your attack." with nothing else after it counts.
+const LOG_RE = /loses (\d+) hitpoints due to your attack\.\s*$/;
 
 function parseLog() {
   const lines = document.getElementById('log-input').value.split('\n');
   const hits = [];
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\r$/, '');
     const m = LOG_RE.exec(line);
     if (m) hits.push(parseInt(m[1]));
   }
@@ -581,7 +652,10 @@ function parseLog() {
   const mn = Math.min(...hits), mx = Math.max(...hits);
   document.getElementById('log-min').textContent = mn;
   document.getElementById('log-max').textContent = mx;
-  document.getElementById('log-count').textContent = `${hits.length} hit${hits.length !== 1 ? 's' : ''} matched`;
+  const uniqueSorted = [...new Set(hits)].sort((a, b) => a - b);
+  const uniqueStr = uniqueSorted.length <= 30 ? uniqueSorted.join(', ') : `${uniqueSorted.length} distinct values`;
+  document.getElementById('log-count').innerHTML =
+    `${hits.length} hit${hits.length !== 1 ? 's' : ''} matched<br>${uniqueSorted.length} unique value${uniqueSorted.length !== 1 ? 's' : ''}: ${uniqueStr}`;
   result.style.display = '';
   useBtn.style.display = '';
 }
@@ -970,6 +1044,7 @@ function renderWeaponsTable(elemResults, sortedMits) {
   for (const elem of ELEMENTS) {
     if (!byElem[elem]) continue;
     const rows = [];
+    const ambiguousItems = []; // {w, display, buckets} — collected first so we can find the easiest to test
     for (const w of byElem[elem]) {
       const map = elemResults[elem];
       const outPairs = new Set();
@@ -987,17 +1062,27 @@ function renderWeaponsTable(elemResults, sortedMits) {
       const display = ambiguous
         ? pairs.slice(0, 3).join(' or ') + (pairs.length > 3 ? ` (+${pairs.length - 3} more)` : '')
         : (pairs[0] || '—');
-      rows.push(`<tr class="${ambiguous ? 'ambiguous' : ''}">
+      if (ambiguous) ambiguousItems.push({ w, buckets: getBuckets(w) });
+      rows.push({ w, display, ambiguous });
+    }
+    const minBuckets = ambiguousItems.length ? Math.min(...ambiguousItems.map(i => i.buckets)) : null;
+    const rowsHtml = rows.map(({ w, display, ambiguous }) => {
+      let hint = '';
+      if (ambiguous) {
+        const buckets = getBuckets(w);
+        hint = `${buckets} bucket${buckets === 1 ? '' : 's'}` + (buckets === minBuckets ? ' — easiest to test' : '');
+      }
+      return `<tr class="${ambiguous ? 'ambiguous' : ''}">
         <td>${w.name}</td>
         <td>${w.min}–${w.max}</td>
         <td class="dmg-cell">${display}</td>
-        <td class="hint-cell">${ambiguous ? 'test this weapon' : ''}</td>
-      </tr>`);
-    }
-    if (!rows.length) continue;
+        <td class="hint-cell">${hint}</td>
+      </tr>`;
+    });
+    if (!rowsHtml.length) continue;
     html += `<div class="elem-group-label"><span class="elem-badge el-${elem}">${ELEM_LABELS[elem]}</span></div>`;
     html += '<table class="wtable"><thead><tr><th>Weapon</th><th>Raw</th><th>Expected output</th><th></th></tr></thead><tbody>';
-    html += rows.join('');
+    html += rowsHtml.join('');
     html += '</tbody></table>';
   }
   if (!html) html = `<div style="font-size:12px; color:var(--text-muted); font-family:var(--mono);">No ambiguous weapons remain for the elements you tested.</div>`;
@@ -1086,6 +1171,14 @@ const SPELL_ELEMENTS = {
   "divine barrage": "holy",
   "strong ethereal spear": "physical",
   "holy missile rune": "holy"
+};
+
+// Some spells' "raw" damage from the API isn't the true hit value - it's
+// been run through a transform on Tibia Tools' side. Reverse that here so
+// what we store is the actual raw damage the formula should use.
+// Death Echo: the API returns ceil(raw * 1.5), so we reverse with floor(x / 1.5).
+const SPELL_RAW_TRANSFORMS = {
+  "death echo": (v) => Math.floor(v / 1.5),
 };
 
 // name -> {name, element, min, max}. In-memory only — never persisted.
@@ -1202,7 +1295,10 @@ function renderSpellResults(data) {
     if (s.raw.min === 0 && s.raw.max === 0) { skippedExcluded.push(s.name); continue; } // unused/unequipped skill
     const elem = SPELL_ELEMENTS[nameLower];
     if (!elem) { skippedUnmapped.push(s.name); continue; }
-    fetchedSpellsMap.set(s.name, { name: s.name, element: elem, min: s.raw.min, max: s.raw.max });
+    const transform = SPELL_RAW_TRANSFORMS[nameLower];
+    const min = transform ? transform(s.raw.min) : s.raw.min;
+    const max = transform ? transform(s.raw.max) : s.raw.max;
+    fetchedSpellsMap.set(s.name, { name: s.name, element: elem, min, max });
     added++;
   }
 
