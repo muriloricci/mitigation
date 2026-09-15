@@ -698,7 +698,7 @@ function parseLog() {
   document.getElementById('log-min').textContent = mn;
   document.getElementById('log-max').textContent = mx;
   const uniqueSorted = [...new Set(hits)].sort((a, b) => a - b);
-  const uniqueStr = uniqueSorted.length <= 30 ? uniqueSorted.join(', ') : `${uniqueSorted.length} distinct values`;
+  const uniqueStr = uniqueSorted.length <= 100 ? uniqueSorted.join(', ') : `${uniqueSorted.length} distinct values`;
   document.getElementById('log-count').innerHTML =
     `${hits.length} hit${hits.length !== 1 ? 's' : ''} matched<br>${uniqueSorted.length} unique value${uniqueSorted.length !== 1 ? 's' : ''}: ${uniqueStr}`;
   result.style.display = '';
