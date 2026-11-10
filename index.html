@@ -1202,7 +1202,7 @@ const SPELL_ELEMENTS = {
   "terra burst (stage 3)": "earth",
   "wrath of nature": "earth",
   "flame strike": "fire",
-  "death echo": "death",
+  "death echo": ["death", "fire", "energy"],
   "great fire wave": "fire",
   "hell's core": "fire",
   "great death beam (central)": "death",
@@ -1342,13 +1342,22 @@ function renderSpellResults(data) {
       skippedExcluded.push(s.name); continue;
     }
     if (s.raw.min === 0 && s.raw.max === 0) { skippedExcluded.push(s.name); continue; } // unused/unequipped skill
-    const elem = SPELL_ELEMENTS[nameLower];
-    if (!elem) { skippedUnmapped.push(s.name); continue; }
+    const elements = SPELL_ELEMENTS[nameLower];
+    if (!elements) { skippedUnmapped.push(s.name); continue; }
+    
     const transform = SPELL_RAW_TRANSFORMS[nameLower];
     const min = transform ? transform(s.raw.min) : s.raw.min;
     const max = transform ? transform(s.raw.max) : s.raw.max;
-    fetchedSpellsMap.set(s.name, { name: s.name, element: elem, min, max });
-    added++;
+    
+    for (const elem of (Array.isArray(elements) ? elements : [elements])) {
+      fetchedSpellsMap.set(`${nameLower}|${elem}`, {
+        name: s.name,
+        element: elem,
+        min,
+        max
+      });
+      added++;
+    }
   }
 
   statusEl.textContent = `Added ${added} spell(s) to the expected-damage list`
